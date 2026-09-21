@@ -2,11 +2,13 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { Truck, User } from 'lucide-react';
 import { useStaff } from '@/store/DataContext';
 import { useAgentStaffId } from '@/agent/useAgentStaffId';
+import { useAuth } from '@/store/AuthContext';
 import { cn } from '@/utils/cn';
 
 export function AgentLayout() {
   const staff = useStaff();
-  const { agentId, selectAgent } = useAgentStaffId();
+  const { agentId, selectAgent, locked } = useAgentStaffId();
+  const { configured, signOut } = useAuth();
   const deliveryAgents = staff.filter((s) => s.role === 'Delivery Executive');
   const agent = staff.find((s) => s.id === agentId);
 
@@ -24,18 +26,31 @@ export function AgentLayout() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <select
-              value={agentId}
-              onChange={(e) => selectAgent(e.target.value)}
-              className="text-xs bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 text-white max-w-[130px] truncate"
-              aria-label="Switch delivery agent"
-            >
-              {deliveryAgents.map((s) => (
-                <option key={s.id} value={s.id} className="text-brand-text">
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            {locked ? (
+              <p className="text-xs text-white/80 max-w-[130px] truncate">{agent?.name}</p>
+            ) : (
+              <select
+                value={agentId}
+                onChange={(e) => selectAgent(e.target.value)}
+                className="text-xs bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 text-white max-w-[130px] truncate"
+                aria-label="Switch delivery agent"
+              >
+                {deliveryAgents.map((s) => (
+                  <option key={s.id} value={s.id} className="text-brand-text">
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {configured && (
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="text-[11px] text-white/70 hover:text-white underline-offset-2 hover:underline"
+              >
+                Sign out
+              </button>
+            )}
             <div className="w-8 h-8 rounded-full bg-brand-primary/30 flex items-center justify-center">
               <User size={16} />
             </div>

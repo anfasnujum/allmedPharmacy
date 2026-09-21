@@ -12,7 +12,7 @@ import { getRequirementStatusVariant, getSourceVariant, getOrderStatusVariant } 
 import { ProductComplianceNotes } from '@/components/products/ProductComplianceNotes';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 import { createTimelineEvent } from '@/utils/helpers';
-import { CURRENT_STAFF_ID } from '@/constants/session';
+import { useActorId } from '@/constants/session';
 import type { RequirementItem } from '@/types';
 
 export function RequirementDetailPage() {
@@ -23,6 +23,7 @@ export function RequirementDetailPage() {
   const staff = useStaff();
   const branches = useBranches();
   const { customers } = useCustomers();
+  const actorId = useActorId();
 
   const [showAddItemsModal, setShowAddItemsModal] = useState(false);
 
@@ -59,7 +60,7 @@ export function RequirementDetailPage() {
   const handleCancel = () => {
     updateRequirement(req.id, {
       status: 'Cancelled',
-      timeline: [...req.timeline, createTimelineEvent('Requirement cancelled', CURRENT_STAFF_ID)],
+      timeline: [...req.timeline, createTimelineEvent('Requirement cancelled', actorId)],
     });
     toast.success('Requirement cancelled');
   };
@@ -68,7 +69,7 @@ export function RequirementDetailPage() {
     const { ok, error } = addItemsToRequirement({
       requirementId: req.id,
       items,
-      actorId: CURRENT_STAFF_ID,
+      actorId,
     });
 
     if (!ok) {

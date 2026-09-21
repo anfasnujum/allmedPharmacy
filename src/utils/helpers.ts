@@ -1,8 +1,21 @@
-let counter = 100;
+function numericSuffix(prefix: string, id: string): number | null {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = id.match(new RegExp(`^${escaped}-(\\d+)$`, 'i'));
+  return match ? Number.parseInt(match[1], 10) : null;
+}
 
-export function generateId(prefix: string): string {
-  counter += 1;
-  return `${prefix}-${counter}`;
+const lastIssued: Record<string, number> = {};
+
+/** Next id like ENQ-005, ORD-012 — sequential from existing records. */
+export function generateId(prefix: string, existingIds: readonly string[] = []): string {
+  let max = lastIssued[prefix] ?? 0;
+  for (const id of existingIds) {
+    const n = numericSuffix(prefix, id);
+    if (n != null && n > max) max = n;
+  }
+  const next = max + 1;
+  lastIssued[prefix] = next;
+  return `${prefix}-${String(next).padStart(3, '0')}`;
 }
 
 export function createTimelineEvent(description: string, actor?: string) {

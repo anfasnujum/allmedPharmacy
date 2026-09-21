@@ -11,7 +11,7 @@ import { FinishPackingModal } from '@/components/orders/FinishPackingModal';
 import { ProductComplianceNotes } from '@/components/products/ProductComplianceNotes';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 import { getOrderStatusVariant, getPaymentStatusVariant } from '@/utils/statusHelpers';
-import { CURRENT_STAFF_ID } from '@/constants/session';
+import { useActorId } from '@/constants/session';
 import { createTimelineEvent } from '@/utils/helpers';
 import { cn } from '@/utils/cn';
 import type { OrderItem } from '@/types';
@@ -27,6 +27,7 @@ export function OrderDetailPage() {
   const { orders, updateOrder, finishOrderPacking, updateOrderStatus } = useOrders();
   const staff = useStaff();
   const branches = useBranches();
+  const actorId = useActorId();
 
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
   const [showFinishModal, setShowFinishModal] = useState(false);
@@ -80,7 +81,7 @@ export function OrderDetailPage() {
       skippedItems: payload.skippedItems,
       newBillNumber: payload.newBillNumber,
       newBillValue: payload.newBillValue,
-      actorId: CURRENT_STAFF_ID,
+      actorId,
     });
 
     if (!ok) {
@@ -122,14 +123,14 @@ export function OrderDetailPage() {
     setCheckedItems(new Set());
     updateOrder(order.id, {
       status: 'Processing',
-      assignedStaffId: CURRENT_STAFF_ID,
-      timeline: [...order.timeline, createTimelineEvent('Packing started', CURRENT_STAFF_ID)],
+      assignedStaffId: actorId,
+      timeline: [...order.timeline, createTimelineEvent('Packing started', actorId)],
     });
     toast.success('Packing started');
   };
 
   const handleCancel = () => {
-    updateOrderStatus(order.id, 'Cancelled', CURRENT_STAFF_ID);
+    updateOrderStatus(order.id, 'Cancelled', actorId);
     setCheckedItems(new Set());
     toast.success('Order cancelled');
   };

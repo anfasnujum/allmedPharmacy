@@ -10,9 +10,12 @@ import {
   ChevronRight,
   Users,
   User,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useState } from 'react';
+import { useAuth } from '@/store/AuthContext';
+import { useCurrentStaff } from '@/constants/session';
 
 const navItems = [
   { to: '/enquiries', label: 'Enquiries', icon: MessageCircleQuestion },
@@ -26,6 +29,9 @@ const navItems = [
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const staff = useCurrentStaff();
+  const { configured, signOut } = useAuth();
+  const staffLabel = staff ? `${staff.name} · ${staff.role}` : 'Staff';
 
   return (
     <aside
@@ -73,18 +79,37 @@ export function Sidebar() {
             'flex items-center gap-3 px-4 py-3',
             collapsed && 'justify-center px-2',
           )}
-          title={collapsed ? 'Priya Nair · Pharmacist' : undefined}
+          title={collapsed ? staffLabel : undefined}
         >
           <div className="w-9 h-9 rounded-full bg-brand-primary/20 flex items-center justify-center shrink-0">
             <User size={18} className="text-white" />
           </div>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="text-sm font-medium text-white leading-tight truncate">Priya Nair</p>
-              <p className="text-xs text-white/60 truncate">Pharmacist</p>
+              <p className="text-sm font-medium text-white leading-tight truncate">
+                {staff?.name ?? 'Staff'}
+              </p>
+              <p className="text-xs text-white/60 truncate">{staff?.role ?? 'Operations'}</p>
             </div>
           )}
         </div>
+
+        {configured && (
+          <div className="px-2 pb-2">
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/10 hover:text-white transition-colors',
+                collapsed && 'justify-center px-2',
+              )}
+              title="Sign out"
+            >
+              <LogOut size={16} className="shrink-0" />
+              {!collapsed && <span>Sign out</span>}
+            </button>
+          </div>
+        )}
 
         <div className="p-2 border-t border-white/10">
           <button

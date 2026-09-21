@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react';
 import { initialData } from '@/data';
@@ -36,12 +37,16 @@ import { getPrimaryAddress } from '@/data/customers';
 import { getProductById, loadProductCatalog, searchProducts } from '@/services/productCatalog';
 import { buildTripStopFromOrder } from '@/utils/tripHelpers';
 import { generateId, createTimelineEvent, normalizePhone, phoneDigits } from '@/utils/helpers';
+import { useAuth } from '@/store/AuthContext';
+import { isSupabaseConfigured, shouldSeedDemoData } from '@/lib/supabase';
+import { fetchAppData, persistAppData } from '@/services/appDb';
 
 const STORAGE_KEY = 'allmed-pharmacy-data';
 
 interface DataContextValue {
   data: AppData;
   loading: boolean;
+  loadError: string | null;
   productsLoading: boolean;
   // Requirements
   addRequirement: (req: Omit<Requirement, 'id' | 'createdAt' | 'updatedAt' | 'timeline' | 'status'>, status?: RequirementStatus) => Requirement;
@@ -143,19 +148,22 @@ function normalizeRequirement(
   };
 }
 
-function normalizeData(data: AppData): AppData {
+function normalizeData(data: AppData, opts?: { mergeSeedGaps?: boolean }): AppData {
+  const mergeSeedGaps = opts?.mergeSeedGaps !== false;
   const staffBranchMap = Object.fromEntries(data.staff.map((s) => [s.id, s.branchId]));
   const storedReqIds = new Set(data.requirements.map((r) => r.id));
   const requirements = [
     ...data.requirements.map((r) => normalizeRequirement(r, staffBranchMap)),
-    ...initialData.requirements
-      .filter((r) => !storedReqIds.has(r.id))
-      .map((r) => normalizeRequirement(r, staffBranchMap)),
+    ...(mergeSeedGaps
+      ? initialData.requirements
+          .filter((r) => !storedReqIds.has(r.id))
+          .map((r) => normalizeRequirement(r, staffBranchMap))
+      : []),
   ];
   return {
     ...data,
-    prescriptions: data.prescriptions ?? initialData.prescriptions,
-    enquiries: data.enquiries ?? initialData.enquiries,
+    prescriptions: data.prescriptions ?? (mergeSeedGaps ? initialData.prescriptions : []),
+    enquiries: data.enquiries ?? (mergeSeedGaps ? initialData.enquiries : []),
     customers: data.customers.map((c) => {
       const normalized = {
         ...c,
@@ -191,7 +199,7 @@ function normalizeData(data: AppData): AppData {
         tripId: order.tripId ?? seed?.tripId,
       };
     }),
-    trips: data.trips?.length ? data.trips : initialData.trips,
+    trips: data.trips?.length ? data.trips : mergeSeedGaps ? initialData.trips : (data.trips ?? []),
   };
 }
 
@@ -218,9 +226,15 @@ function saveData(data: AppData) {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AppData>(loadData);
+  const { configured, loading: authLoading, session } = useAuth();
+  const [data, setData] = useState<AppData>({ ...initialData, products: [] });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [productsLoading, setProductsLoading] = useState(true);
+  const hydratedRef = useRef(false);
+  const skipPersistRef = useRef(true);
+  const lastOpsJson = useRef('');
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     loadProductCatalog()
@@ -234,12 +248,96 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(timer);
-  }, []);
+    let cancelled = false;
+
+    async function init() {
+      if (authLoading) return;
+      if (configured && !session) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setLoadError(null);
+      hydratedRef.current = false;
+
+      try {
+        if (!isSupabaseConfigured()) {
+          if (!cancelled) {
+            setData((prev) => ({ ...loadData(), products: prev.products }));
+            hydratedRef.current = true;
+            skipPersistRef.current = true;
+          }
+          return;
+        }
+
+        const remote = await fetchAppData();
+        if (cancelled) return;
+        const empty = remote.branches.length === 0;
+
+        if (empty && shouldSeedDemoData()) {
+          const seeded = normalizeData({ ...initialData, products: [] });
+          await persistAppData(seeded);
+          if (cancelled) return;
+          setData((prev) => ({ ...seeded, products: prev.products }));
+        } else {
+          setData((prev) => ({
+            ...normalizeData(
+              {
+                ...remote,
+                products: [],
+              },
+              { mergeSeedGaps: false },
+            ),
+            products: prev.products,
+          }));
+        }
+        hydratedRef.current = true;
+        skipPersistRef.current = true;
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load data from Supabase');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, authLoading, session]);
 
   useEffect(() => {
-    if (!loading) saveData(data);
+    if (!hydratedRef.current || loading) return;
+
+    const { products: _products, ...rest } = data;
+    const snapshot = JSON.stringify(rest);
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false;
+      lastOpsJson.current = snapshot;
+      if (!isSupabaseConfigured()) saveData(data);
+      return;
+    }
+    if (snapshot === lastOpsJson.current) return;
+    lastOpsJson.current = snapshot;
+
+    if (!isSupabaseConfigured()) {
+      saveData(data);
+      return;
+    }
+
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      void persistAppData(rest).catch((err) => {
+        console.error('Failed to save to Supabase', err);
+      });
+    }, 500);
+
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+    };
   }, [data, loading]);
 
   const update = useCallback((fn: (prev: AppData) => AppData) => {
@@ -265,12 +363,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const primary = customer.addresses?.find((a) => a.isPrimary) ?? customer.addresses?.[0];
       const newCustomer: Customer = {
         ...customer,
-        id: generateId('CUS'),
+        id: generateId('CUS', data.customers.map((c) => c.id)),
         totalOrders: 0,
         phone: normalizePhone(customer.phone),
         alternatePhone: customer.alternatePhone ? normalizePhone(customer.alternatePhone) : undefined,
         whatsappPhone: customer.whatsappPhone ? normalizePhone(customer.whatsappPhone) : undefined,
-        addresses: (customer.addresses ?? []).map((a) => ({ ...a, id: a.id || generateId('ADDR') })),
+        addresses: (customer.addresses ?? []).map((a) => ({
+          ...a,
+          id: a.id || generateId(
+            'ADDR',
+            data.customers.flatMap((c) => c.addresses.map((addr) => addr.id)),
+          ),
+        })),
         address: primary?.addressLine ?? customer.address,
         area: primary?.area ?? customer.area,
         createdAt: new Date().toISOString().split('T')[0],
@@ -278,7 +382,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       update((prev) => ({ ...prev, customers: [...prev.customers, newCustomer] }));
       return newCustomer;
     },
-    [update],
+    [update, data.customers],
   );
 
   const syncCustomerPrimaryFields = (customer: Customer): Customer => {
@@ -308,7 +412,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const addCustomerAddress = useCallback(
     (customerId: string, address: Omit<CustomerAddress, 'id'>) => {
-      const newAddress: CustomerAddress = { ...address, id: generateId('ADDR') };
+      const newAddress: CustomerAddress = {
+        ...address,
+        id: generateId('ADDR', data.customers.flatMap((c) => c.addresses.map((a) => a.id))),
+      };
       update((prev) => ({
         ...prev,
         customers: prev.customers.map((c) => {
@@ -321,7 +428,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }));
       return newAddress;
     },
-    [update],
+    [update, data.customers],
   );
 
   const updateCustomerAddress = useCallback(
@@ -390,7 +497,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const deliveryCharge = deliveryRequired ? 50 : 0;
 
     return {
-      id: generateId('ORD'),
+      id: generateId('ORD', prev.orders.map((o) => o.id)),
       requirementId: req.id,
       customerId: req.customerId,
       customerName: req.customerName,
@@ -449,7 +556,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     if (order.paymentStatus !== 'Paid') {
       const collection: Collection = {
-        id: generateId('COL'),
+        id: generateId('COL', prev.collections.map((c) => c.id)),
         orderId: order.id,
         customerId: order.customerId,
         customerName: order.customerName,
@@ -511,7 +618,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const deliveryCharge = deliveryRequired ? 50 : 0;
 
     return {
-      id: generateId('ORD'),
+      id: generateId('ORD', prev.orders.map((o) => o.id)),
       requirementId: req.id,
       customerId: req.customerId,
       customerName: req.customerName,
@@ -559,7 +666,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     if (order.paymentStatus !== 'Paid') {
       const collection: Collection = {
-        id: generateId('COL'),
+        id: generateId('COL', prev.collections.map((c) => c.id)),
         orderId: order.id,
         customerId: order.customerId,
         customerName: order.customerName,
@@ -595,7 +702,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const timelineMessage = status === 'Follow-up' ? 'Requirement saved for follow-up' : 'Requirement received';
       const newReq: Requirement = {
         ...req,
-        id: generateId('REQ'),
+        id: generateId('REQ', data.requirements.map((r) => r.id)),
         status,
         createdAt: now,
         updatedAt: now,
@@ -605,7 +712,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       update((prev) => ({ ...prev, requirements: [newReq, ...prev.requirements] }));
       return newReq;
     },
-    [update],
+    [update, data.requirements],
   );
 
   const updateRequirement = useCallback(
@@ -709,14 +816,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     (order: Omit<Order, 'id' | 'orderDate' | 'timeline'>) => {
       const newOrder: Order = {
         ...order,
-        id: generateId('ORD'),
+        id: generateId('ORD', data.orders.map((o) => o.id)),
         orderDate: new Date().toISOString(),
         timeline: [createTimelineEvent('Order created', order.assignedStaffId)],
       };
       update((prev) => ({ ...prev, orders: [newOrder, ...prev.orders] }));
       return newOrder;
     },
-    [update],
+    [update, data.orders],
   );
 
   const updateOrder = useCallback(
@@ -757,7 +864,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           const existingCol = prev.collections.find((c) => c.orderId === id);
           if (!existingCol && order.paymentStatus !== 'Paid') {
             const collection: Collection = {
-              id: generateId('COL'),
+              id: generateId('COL', prev.collections.map((c) => c.id)),
               orderId: id,
               customerId: order.customerId,
               customerName: order.customerName,
@@ -905,7 +1012,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (!order) return prev;
 
         const completedRecord: CompletedRecord = {
-          id: generateId('CMP'),
+          id: generateId('CMP', prev.completed.map((c) => c.id)),
           orderId: order.id,
           customerId: order.customerId,
           customerName: order.customerName,
@@ -966,7 +1073,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         });
 
         const trip: Trip = {
-          id: generateId('TRP'),
+          id: generateId('TRP', prev.trips.map((t) => t.id)),
           branchId,
           deliveryPersonId,
           status: 'Scheduled',
@@ -1154,7 +1261,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           const customer = prev.customers.find((c) => c.id === order.customerId);
           if (customer) {
             const newAddr = {
-              id: generateId('ADDR'),
+              id: generateId('ADDR', prev.customers.flatMap((c) => c.addresses.map((a) => a.id))),
               label: input.newAddressLabel.trim(),
               addressLine: input.addressLine.trim(),
               area: input.area.trim(),
@@ -1254,7 +1361,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (orderStatus === 'Completed') {
           completed = [
             {
-              id: generateId('CMP'),
+              id: generateId('CMP', prev.completed.map((c) => c.id)),
               orderId: order.id,
               customerId: order.customerId,
               customerName: order.customerName,
@@ -1314,7 +1421,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const queryLabel = enquiry.queryCustom?.trim() || enquiry.query;
       const newEnquiry: Enquiry = {
         ...enquiry,
-        id: generateId('ENQ'),
+        id: generateId('ENQ', data.enquiries.map((e) => e.id)),
         status: 'Open',
         createdAt: now,
         updatedAt: now,
@@ -1323,7 +1430,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       update((prev) => ({ ...prev, enquiries: [newEnquiry, ...prev.enquiries] }));
       return newEnquiry;
     },
-    [update],
+    [update, data.enquiries],
   );
 
   const updateEnquiry = useCallback(
@@ -1443,6 +1550,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       value={{
         data,
         loading,
+        loadError,
         productsLoading,
         addRequirement,
         updateRequirement,

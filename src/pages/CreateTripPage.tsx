@@ -10,7 +10,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatCurrency } from '@/utils/format';
 import { buildTripStopFromOrder } from '@/utils/tripHelpers';
 import { getOrderStatusVariant } from '@/utils/statusHelpers';
-import { CURRENT_STAFF_ID, getDefaultDeliveryAgentId, setAgentStaffId } from '@/constants/session';
+import { useActorId, getDefaultDeliveryAgentId, setAgentStaffId } from '@/constants/session';
 import { cn } from '@/utils/cn';
 
 export function CreateTripPage() {
@@ -20,6 +20,7 @@ export function CreateTripPage() {
   const staff = useStaff();
   const { createTrip } = useTrips();
   const { activeBranch } = useBranch();
+  const actorId = useActorId();
 
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
 
@@ -79,7 +80,7 @@ export function CreateTripPage() {
       branchId: activeBranch.id,
       deliveryPersonId,
       orderIds: selectedOrderIds,
-      actorId: CURRENT_STAFF_ID,
+      actorId,
     });
     if (!trip) {
       toast.error('Could not create trip');

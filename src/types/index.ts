@@ -63,6 +63,7 @@ export interface Staff {
   role: string;
   branchId: string;
   phone: string;
+  email?: string;
 }
 
 export type PrescriptionStatus = 'Active' | 'Expired' | 'Completed';

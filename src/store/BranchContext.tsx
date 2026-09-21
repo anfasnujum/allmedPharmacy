@@ -8,14 +8,9 @@ import {
   type ReactNode,
 } from 'react';
 import type { Branch, Order } from '@/types';
-import { branches as allBranches } from '@/data/branches';
+import { useBranches } from '@/store/DataContext';
 
 const STORAGE_KEY = 'allmed-active-branch';
-
-/** Branches the current user can operate in (mock: all active branches) */
-const ACCESSIBLE_BRANCH_IDS = allBranches
-  .filter((b) => b.status === 'Active')
-  .map((b) => b.id);
 
 interface BranchContextValue {
   activeBranch: Branch;
@@ -30,23 +25,36 @@ interface BranchContextValue {
 
 const BranchContext = createContext<BranchContextValue | null>(null);
 
-function loadActiveBranchId(): string {
+function loadStoredBranchId(accessibleIds: string[]): string {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && ACCESSIBLE_BRANCH_IDS.includes(stored)) return stored;
+    if (stored && accessibleIds.includes(stored)) return stored;
   } catch {
     // fall through
   }
-  return ACCESSIBLE_BRANCH_IDS[0] ?? 'BR-001';
+  return accessibleIds[0] ?? 'BR-001';
 }
 
 export function BranchProvider({ children }: { children: ReactNode }) {
-  const [activeBranchId, setActiveBranchIdState] = useState(loadActiveBranchId);
-
+  const allBranches = useBranches();
   const accessibleBranches = useMemo(
-    () => allBranches.filter((b) => ACCESSIBLE_BRANCH_IDS.includes(b.id)),
-    [],
+    () => allBranches.filter((b) => b.status === 'Active'),
+    [allBranches],
   );
+  const accessibleIds = useMemo(
+    () => accessibleBranches.map((b) => b.id),
+    [accessibleBranches],
+  );
+
+  const [activeBranchId, setActiveBranchIdState] = useState(() =>
+    loadStoredBranchId(accessibleIds),
+  );
+
+  useEffect(() => {
+    if (accessibleIds.length > 0 && !accessibleIds.includes(activeBranchId)) {
+      setActiveBranchIdState(accessibleIds[0]);
+    }
+  }, [accessibleIds, activeBranchId]);
 
   const activeBranch = useMemo(
     () => accessibleBranches.find((b) => b.id === activeBranchId) ?? accessibleBranches[0],
@@ -61,11 +69,14 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     }
   }, [activeBranchId]);
 
-  const setActiveBranchId = useCallback((id: string) => {
-    if (ACCESSIBLE_BRANCH_IDS.includes(id)) {
-      setActiveBranchIdState(id);
-    }
-  }, []);
+  const setActiveBranchId = useCallback(
+    (id: string) => {
+      if (accessibleIds.includes(id)) {
+        setActiveBranchIdState(id);
+      }
+    },
+    [accessibleIds],
+  );
 
   const matchesBranch = useCallback(
     (branchId?: string) => !branchId || branchId === activeBranchId,
@@ -79,6 +90,14 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     },
     [activeBranchId],
   );
+
+  if (!activeBranch) {
+    return (
+      <div className="min-h-screen bg-brand-background flex items-center justify-center p-6">
+        <p className="text-sm text-brand-text-secondary">No active branches found.</p>
+      </div>
+    );
+  }
 
   return (
     <BranchContext.Provider

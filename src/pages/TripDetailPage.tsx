@@ -13,7 +13,7 @@ import { TripOrdersPanel } from '@/components/trips/TripOrdersPanel';
 import { useTripPickupState } from '@/components/trips/useTripPickupState';
 import { formatDateTime } from '@/utils/format';
 import { getTripStatusVariant } from '@/utils/statusHelpers';
-import { CURRENT_STAFF_ID } from '@/constants/session';
+import { useActorId } from '@/constants/session';
 import type { TripStop } from '@/types';
 
 export function TripDetailPage() {
@@ -23,6 +23,7 @@ export function TripDetailPage() {
   const { orders } = useOrders();
   const staff = useStaff();
   const { activeBranch } = useBranch();
+  const actorId = useActorId();
 
   const [completeStop, setCompleteStop] = useState<TripStop | null>(null);
 
@@ -46,7 +47,7 @@ export function TripDetailPage() {
       toast.error(`Pick up all orders first (${pickupRemaining} remaining)`);
       return;
     }
-    const ok = startTrip(trip.id, CURRENT_STAFF_ID);
+    const ok = startTrip(trip.id, actorId);
     if (!ok) {
       toast.error('Could not start trip');
       return;
@@ -60,7 +61,7 @@ export function TripDetailPage() {
       toast.error(`${pending.length} order(s) still pending`);
       return;
     }
-    const ok = endTrip(trip.id, CURRENT_STAFF_ID);
+    const ok = endTrip(trip.id, actorId);
     if (!ok) {
       toast.error('Could not end trip');
       return;
@@ -82,7 +83,7 @@ export function TripDetailPage() {
       tripId: trip.id,
       orderId: completeStop.orderId,
       ...payload,
-      actorId: CURRENT_STAFF_ID,
+      actorId,
     });
     if (!ok) {
       toast.error(error ?? 'Could not complete order');
@@ -145,7 +146,7 @@ export function TripDetailPage() {
             <TripOrdersPanel
               trip={trip}
               orders={orders}
-              actorId={CURRENT_STAFF_ID}
+              actorId={actorId}
               variant="web"
               onCompleteStop={isInProgress ? setCompleteStop : undefined}
             />
