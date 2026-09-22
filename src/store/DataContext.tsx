@@ -1636,7 +1636,12 @@ export function useEnquiries() {
 
 export function useProducts() {
   const { data, productsLoading } = useData();
-  return { products: data.products, productsLoading, searchProducts };
+  const products = data.products;
+  const search = useCallback(
+    (query: string, limit = 10) => searchProducts(query, limit, products),
+    [products],
+  );
+  return { products, productsLoading, searchProducts: search };
 }
 
 export function useBranches() {

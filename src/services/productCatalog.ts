@@ -70,28 +70,28 @@ export function getProductById(id: string): Product | undefined {
   return catalog.find((p) => p.id === id || p.code === id || p.sku === id);
 }
 
-export function searchProducts(query: string, limit = 10): Product[] {
+export function searchProducts(query: string, limit = 10, source?: Product[]): Product[] {
+  const list = source && source.length > 0 ? source : catalog;
   const q = query.toLowerCase().trim();
-  if (!q || !loaded) return [];
+  if (!q || list.length === 0) return [];
 
-  const exact = catalog.find(
+  const useModuleIndex = list === catalog && searchIndex.length === catalog.length;
+  const textAt = (i: number) => (useModuleIndex ? searchIndex[i] : buildSearchText(list[i]));
+
+  const exact = list.find(
     (p) =>
       p.code?.toLowerCase() === q ||
       p.sku?.toLowerCase() === q ||
       p.id?.toLowerCase() === q,
   );
 
-  if (q.length < 2) {
-    return exact ? [exact] : [];
-  }
-
   const results: Product[] = exact ? [exact] : [];
   const seen = new Set(results.map((p) => p.id));
 
-  for (let i = 0; i < catalog.length && results.length < limit; i++) {
-    if (searchIndex[i].includes(q) && !seen.has(catalog[i].id)) {
-      results.push(catalog[i]);
-      seen.add(catalog[i].id);
+  for (let i = 0; i < list.length && results.length < limit; i++) {
+    if (textAt(i).includes(q) && !seen.has(list[i].id)) {
+      results.push(list[i]);
+      seen.add(list[i].id);
     }
   }
   return results;

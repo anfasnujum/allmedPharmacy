@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Trash2 } from 'lucide-react';
 import { useProducts } from '@/store/DataContext';
-import { getProductCatalog } from '@/services/productCatalog';
 import { productSelectionFields } from '@/utils/productCompliance';
 import { ProductComplianceNotes } from '@/components/products/ProductComplianceNotes';
 import { cn } from '@/utils/cn';
@@ -44,11 +44,39 @@ export function RequirementMedicineEditor({ items, onChange, error }: Requiremen
 
   const suggestions = useMemo(() => {
     if (!inSlashMode) return [];
-    const catalog = getProductCatalog();
-    const source = catalog.length > 0 ? catalog : products;
-    if (!slashQuery) return source.slice(0, 8);
+    if (!slashQuery.trim()) return products.slice(0, 8);
     return searchProducts(slashQuery, 8);
   }, [inSlashMode, slashQuery, searchProducts, products]);
+
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!inSlashMode) {
+      setMenuPos(null);
+      return;
+    }
+    const update = () => {
+      const el = medicineRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const width = Math.max(r.width, 280);
+      const maxHeight = 208;
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      const openUp = spaceBelow < 120 && r.top > spaceBelow;
+      setMenuPos({
+        top: openUp ? r.top - Math.min(maxHeight, r.top - 8) - 4 : r.bottom + 4,
+        left: Math.min(r.left, window.innerWidth - width - 8),
+        width,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [inSlashMode, slashQuery, suggestions.length]);
 
   useEffect(() => {
     setHighlightIndex(0);
@@ -226,39 +254,43 @@ export function RequirementMedicineEditor({ items, onChange, error }: Requiremen
               placeholder="Type / to search medicine by name or product code…"
               spellCheck={false}
             />
-            {inSlashMode && (
-              <div
-                className="absolute z-[100] left-2 right-2 top-full mt-1 bg-white border border-brand-border rounded-lg shadow-xl max-h-52 overflow-y-auto"
-              >
-                {productsLoading && (
-                  <p className="px-3 py-2 text-xs text-brand-text-secondary">Loading catalog…</p>
-                )}
-                {!productsLoading && suggestions.length === 0 && (
-                  <p className="px-3 py-2 text-xs text-brand-text-secondary">
-                    {slashQuery ? 'No matches — keep typing' : 'Type name or code after /'}
-                  </p>
-                )}
-                {suggestions.map((p, idx) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => selectProduct(p)}
-                    className={cn(
-                      'w-full text-left px-3 py-2 text-sm border-b last:border-0',
-                      idx === highlightIndex ? 'bg-brand-cyan/10' : 'hover:bg-gray-50',
-                    )}
-                  >
-                    <span className="font-medium">{p.name}</span>
-                    <span className="text-brand-text-secondary ml-2 text-xs">
-                      {p.strength}
-                      {p.code ? ` · ${p.code}` : ''}
-                      {p.brand ? ` · ${p.brand}` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {inSlashMode &&
+              menuPos &&
+              createPortal(
+                <div
+                  className="fixed z-[200] bg-white border border-brand-border rounded-lg shadow-xl max-h-52 overflow-y-auto"
+                  style={{ top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+                >
+                  {productsLoading && (
+                    <p className="px-3 py-2 text-xs text-brand-text-secondary">Loading catalog…</p>
+                  )}
+                  {!productsLoading && suggestions.length === 0 && (
+                    <p className="px-3 py-2 text-xs text-brand-text-secondary">
+                      {slashQuery ? 'No matches — keep typing' : 'Type name or code after /'}
+                    </p>
+                  )}
+                  {suggestions.map((p, idx) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => selectProduct(p)}
+                      className={cn(
+                        'w-full text-left px-3 py-2 text-sm border-b last:border-0',
+                        idx === highlightIndex ? 'bg-brand-cyan/10' : 'hover:bg-gray-50',
+                      )}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-brand-text-secondary ml-2 text-xs">
+                        {p.strength}
+                        {p.code ? ` · ${p.code}` : ''}
+                        {p.brand ? ` · ${p.brand}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
           </div>
 
           <div className="p-2 flex flex-col justify-center items-center bg-gray-50/30">
